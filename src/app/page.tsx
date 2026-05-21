@@ -116,7 +116,7 @@ export default function Home() {
     let conversationId = activeConversationId;
 
     // If no active conversation, create one.
-    // Use the first ~50 chars of the user's message as the title.
+    // We must await this because we need the conversation ID before saving messages.
     if (!conversationId) {
       const title =
         text.length > 50 ? text.substring(0, 50) + "..." : text;
@@ -126,11 +126,10 @@ export default function Home() {
       setConversations((prev) => [conv, ...prev]);
     }
 
-    // Save the user's message to the database
-    await saveMessage(supabase, conversationId, "user", text);
-
-    // Send to the AI (this triggers the streaming response)
+    // Send to the AI immediately — user sees their message appear on screen right away.
+    // Save to DB in the background — no need to block the UI for a write.
     sendMessage({ text });
+    saveMessage(supabase, conversationId, "user", text);
   };
 
   return (

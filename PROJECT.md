@@ -1,5 +1,7 @@
 # KT-Killer: AI-Powered Company Brain
 
+**Live URL:** https://kt-killer-c3ubud3nu-himanshugoyal2000s-projects.vercel.app/
+
 ## What Is This?
 
 An AI-powered knowledge hub that any company can plug into — regardless of scale. It ingests a company's scattered knowledge (docs, wikis, runbooks, Confluence, Slack, Jira, code repos) and becomes the single place to ask anything about the company.
