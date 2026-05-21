@@ -148,7 +148,9 @@ export default function Home() {
         <header className="flex items-center justify-between px-6 py-4 border-b border-border">
           <h1 className="text-lg font-semibold">KT-Killer</h1>
           <div className="flex items-center gap-4">
-            <span className="text-sm text-muted">Company Brain</span>
+            <a href="/admin" className="text-sm text-muted hover:text-foreground transition-colors">
+              Admin
+            </a>
             <SignOutButton />
           </div>
         </header>

@@ -97,7 +97,26 @@ Query Flow:
        → Top-K chunks retrieved → Injected into prompt → OpenAI → Response with citations
 ```
 
-### Status: NOT STARTED
+### Key Files
+- `supabase/phase2_schema.sql` — Multi-tenant schema (orgs, profiles, spaces, documents, chunks with pgvector + RLS)
+- `supabase/seed.sql` — Seeds NovaMart org, user profile, and spaces
+- `docs/novamart/*.md` — 11 fictional company documents for testing
+- `scripts/seed-docs.ts` — Bulk ingestion script (chunk → embed → store)
+- `src/lib/chunker.ts` — Recursive markdown splitter (1500 char chunks, 200 char overlap)
+- `src/lib/embeddings.ts` — OpenAI text-embedding-3-small wrapper (single + batch)
+- `src/lib/ingest.ts` — Ingestion orchestrator (chunk → embed → store in Supabase)
+- `src/lib/rag.ts` — RAG retrieval (embed query → vector search via RPC → enrich with metadata)
+- `src/app/api/documents/route.ts` — Document upload API (admin-only)
+- `src/app/api/chat/route.ts` — Updated to inject RAG context into system prompt
+
+### Lessons Learned
+- pgvector RPC requires embeddings as JSON strings, not raw arrays — silent failure otherwise
+- `text-embedding-3-small` cosine similarity tops out ~0.6 for good matches; threshold of 0.3 works, 0.7 is too aggressive
+- Supabase free tier blocks `auth` schema modifications — use `public` schema for custom SQL functions
+- `SECURITY DEFINER` on `user_org_id()` is necessary to avoid circular RLS dependency (function reads profiles, profiles has RLS that calls the function)
+- Larger chunks = lower similarity scores but richer context; smaller chunks = higher scores but fragmented context
+
+### Status: COMPLETED
 
 ---
 
