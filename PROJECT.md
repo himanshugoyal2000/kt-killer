@@ -165,57 +165,119 @@ User Query → LLM sees available tools → decides what to do:
 
 ---
 
-## Phase 4: Production Hardening
+## Phase 4: MCP — Making KT-Killer a Platform
 
 ### What Gets Built
-- Rate limiting and usage quotas per user
-- Semantic caching (similar questions hit cache)
-- Guardrails (input validation, output safety, PII detection)
-- Observability dashboard (queries, latency, cost, token usage)
-- Evaluation pipeline (automated tests for answer quality)
-- Fallback models (if OpenAI is down, route to Anthropic)
-- Error handling and graceful degradation
+- Turn KT-Killer's knowledge base into an MCP Server that any MCP client can connect to
+- Make KT-Killer an MCP Client that can connect to external MCP servers
+- Connect to a real third-party MCP server (e.g., Confluence)
+- Admin UI to configure which MCP servers an org connects to
 
 ### AI Concepts Learned
-- LLM observability and tracing (LangSmith / Langfuse)
-- Semantic caching (using embeddings to match "similar enough" queries)
-- Guardrails and safety patterns
-- Evaluation: how to test AI systems (golden test sets, LLM-as-judge)
-- Cost optimization (token budgeting, prompt compression)
-- Latency optimization (streaming, parallel calls, caching)
-- Deployment patterns for AI apps
+- MCP protocol (JSON-RPC, tools/resources/prompts)
+- MCP Server development (expose your tools as a standard service)
+- MCP Client integration (consume external tools dynamically)
+- Dynamic tool registration (tools discovered at runtime, not hardcoded)
+- The "platform vs application" mindset
+
+### Architecture
+```
+KT-Killer as MCP Client:
+  User Query → LLM → decides which tool → could be:
+    ├── Internal tool (searchKnowledgeBase)
+    ├── Confluence MCP Server → search live Confluence pages
+    ├── Slack MCP Server → search Slack history
+    └── Any custom MCP Server the company plugs in
+
+KT-Killer as MCP Server:
+  External MCP Client (Cursor, Claude Desktop, etc.)
+    → connects to KT-Killer MCP Server
+    → can search the company knowledge base from any AI tool
+```
 
 ### Status: NOT STARTED
 
 ---
 
-## Phase 5: Multi-Agent System
+## Phase 5: Goal-Based Agents + Structured Output + Model Agnosticism
 
 ### What Gets Built
-- Router agent that classifies queries and delegates to specialists
-- Search Agent — finds information across the knowledge base
-- Summarizer Agent — creates summaries of documents or topics
-- Onboarding Agent — answers new employee questions with step-by-step guides
-- Incident Agent — helps debug issues by searching docs + suggesting solutions
-- Agent communication protocol (agents can consult each other)
+- Goal-based autonomous agent: user defines a goal, agent plans steps, executes iteratively until done
+- Example task: "Audit all runbooks and report which ones are missing error handling sections"
+- Agent planner: LLM generates a structured plan (steps, dependencies, success criteria)
+- Agent executor: loop that runs steps, checks progress, adapts plan if a step fails
+- Agent memory: tracks completed steps, partial results, and remaining work
+- Structured JSON responses via `generateObject` with Zod schema validation
+- Model switcher: swap between OpenAI GPT-4o, Anthropic Claude, Google Gemini via AI SDK provider registry
+- Per-org model configuration (each tenant can pick their preferred LLM)
 
 ### AI Concepts Learned
-- Multi-agent orchestration patterns
-- Agent routing and classification
-- Agent communication and handoff
-- Parallel agent execution
-- Consensus and conflict resolution between agents
-- When multi-agent is worth the complexity (and when it's not)
+- Goal-oriented agents vs reactive agents (Phase 3)
+- Planning: LLM generates a structured execution plan before acting
+- Iterative execution with progress tracking and plan adaptation
+- Structured output / JSON mode (`generateObject` in AI SDK)
+- Output validation with Zod schemas
+- Provider abstraction (AI SDK model registry)
+- Few-shot prompting, chain-of-thought, prompt templates
+- How different models behave differently on the same prompt
+- When autonomous agents are worth the cost and complexity
 
 ### Architecture
 ```
-User Query → Router Agent
-  → Classifies intent
-  → Delegates to 1+ specialist agents
-  → Each agent may use RAG + tools
-  → Results synthesized into final response
-  → Response has labeled sections from each specialist
+User sets goal: "Audit all runbooks for missing sections"
+  → LLM generates plan:
+      Step 1: List all runbooks (listDocuments tool)
+      Step 2: For each runbook, search for error handling section
+      Step 3: Compile findings into structured report
+  → Agent loop:
+      Execute step 1 → got 5 runbooks → update memory
+      Execute step 2a → payments runbook has error handling → log result
+      Execute step 2b → inventory runbook missing error handling → log result
+      ...
+      Execute step 3 → generate structured audit report
+  → Return final report with structured JSON + human-readable summary
 ```
+
+### Status: NOT STARTED
+
+---
+
+## Phase 6: Evals + Observability — Testing AI Systems
+
+### What Gets Built
+- Golden test set: 30+ question/expected-answer pairs for KT-Killer
+- Automated eval runner that scores retrieval quality (did we find the right chunks?) and answer quality (did the LLM answer correctly?)
+- LLM-as-judge: use a strong model to grade a weaker model's answers
+- Observability: log every request with query, retrieved chunks, similarity scores, tool calls, tokens used, latency, cost
+- Dashboard to visualize eval results and query analytics
+
+### AI Concepts Learned
+- How to write evals for RAG systems (retrieval precision/recall, answer correctness)
+- LLM-as-judge pattern (using GPT-4o to evaluate GPT-4o-mini)
+- Regression testing for AI (did a prompt change break existing answers?)
+- Observability for AI apps (what to log, how to analyze)
+- Cost tracking and token budgeting
+
+### Status: NOT STARTED
+
+---
+
+## Phase 7: Production Hardening
+
+### What Gets Built
+- Rate limiting per user/org (token bucket or sliding window)
+- Semantic caching (embed the query, check if a similar query was answered recently)
+- Input guardrails (prompt injection detection, PII scrubbing)
+- Output guardrails (hallucination detection, off-topic filtering)
+- Fallback models (if OpenAI is down, route to Anthropic)
+- Graceful degradation (if RAG fails, answer with disclaimer)
+
+### AI Concepts Learned
+- Semantic caching (embedding-based cache key matching)
+- Prompt injection attacks and defenses
+- Guardrails patterns (pre-processing, post-processing, circuit breakers)
+- Fallback and retry strategies for LLM APIs
+- Cost optimization (prompt compression, model routing by query complexity)
 
 ### Status: NOT STARTED
 
@@ -242,6 +304,13 @@ Quick reference for AI terms mapped to backend engineering concepts:
 | Temperature | 0 = deterministic, 1+ = creative/random. Config knob for response style. |
 | Streaming | Response comes token-by-token (SSE) instead of all at once. Like Kafka but for API responses. |
 | Inference | Running a model to get output. Calling the OpenAI API = doing inference. |
+| MCP | USB-C for AI tools. A standard protocol so any AI app can connect to any tool provider. |
+| Structured Output | Forcing the LLM to return valid JSON matching a schema, instead of free-form text. |
+| Evals | Test suites for AI. Question/expected-answer pairs that verify your system works correctly. |
+| LLM-as-Judge | Using a strong model (GPT-4o) to grade a weaker model's answers. Cheaper than human eval. |
+| Prompt Injection | When a user tricks the LLM into ignoring its instructions. The SQL injection of AI. |
+| Semantic Cache | Cache that matches by meaning, not exact string. "retry policy" and "what is the retry strategy" hit the same cache entry. |
+| Goal-Based Agent | An autonomous agent that takes a high-level goal, plans steps, and iterates until the goal is met. Unlike reactive agents that answer one question, these execute multi-step tasks. |
 
 ---
 
