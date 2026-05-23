@@ -1,46 +1,36 @@
-import { streamText, type UIMessage } from "ai";
+import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createClient } from "@/lib/supabase/server";
-import { retrieveContext, formatContextForPrompt } from "@/lib/rag";
+import { createTools } from "@/lib/tools";
 
-// The system prompt now instructs the model to use retrieved context.
-// It also tells the model to cite its sources — this is how RAG answers
-// become trustworthy (users can verify the source).
+// Phase 3 system prompt: the LLM is now an AGENT with tools.
+// Instead of "here's context, answer from it" (Phase 2),
+// we tell the model "you have tools — decide which ones to use."
 const SYSTEM_PROMPT = `You are KT-Killer, an AI-powered company knowledge assistant.
 Your job is to help engineers find information, understand systems, and onboard faster.
 
+You have access to tools that let you search the knowledge base, list documents,
+generate diagrams, and summarize across multiple documents.
+
 Rules:
-- Answer based on the provided context from the company knowledge base.
-- If the context contains relevant information, use it and cite the source.
-- If the context does not contain relevant information, say so clearly. Do not make up answers.
-- When citing, use the format: (Source: Space > Document Title)
+- For company-specific questions, ALWAYS use the searchKnowledgeBase tool first.
+- When citing information, use the format: (Source: Space > Document Title)
+- If no relevant information is found, say so clearly. Do not make up answers.
+- For diagram requests, first search for relevant info, then generate the diagram.
+- For overview/summary requests, use the summarizeDocuments tool.
+- For casual greetings or general questions, respond directly without tools.
 - Be concise and technical. Engineers don't need fluff.
 - Format responses with markdown for readability.`;
-
-function convertToModelMessages(
-  uiMessages: UIMessage[]
-): { role: "user" | "assistant"; content: string }[] {
-  return uiMessages.map((msg) => ({
-    role: msg.role as "user" | "assistant",
-    content: msg.parts
-      .filter(
-        (part): part is { type: "text"; text: string } => part.type === "text"
-      )
-      .map((part) => part.text)
-      .join(""),
-  }));
-}
 
 export async function POST(req: Request) {
   const { messages } = await req.json();
 
-  // Get the user's org from their profile for org-scoped RAG search
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
-  let contextBlock = "";
+  let tools = {};
 
   if (user) {
     const { data: profile } = await supabase
@@ -50,35 +40,26 @@ export async function POST(req: Request) {
       .single();
 
     if (profile?.org_id) {
-      const modelMessages = convertToModelMessages(messages);
-      const lastUserMessage = modelMessages
-        .filter((m) => m.role === "user")
-        .pop();
-
-      if (lastUserMessage) {
-        try {
-          const chunks = await retrieveContext(
-            supabase,
-            profile.org_id,
-            lastUserMessage.content
-          );
-          contextBlock = formatContextForPrompt(chunks);
-        } catch (error) {
-          console.error("RAG retrieval error:", error);
-        }
-      }
+      tools = createTools(supabase, profile.org_id);
     }
   }
 
-  // Build the final system prompt: base instructions + retrieved context
-  const fullSystemPrompt = contextBlock
-    ? `${SYSTEM_PROMPT}\n\n${contextBlock}`
-    : SYSTEM_PROMPT;
-
+  // streamText with tools + stopWhen creates the AGENT LOOP:
+  //
+  //   1. LLM sees the user message + tool descriptions
+  //   2. LLM decides: answer directly OR call a tool
+  //   3. If tool called → our execute() runs → result sent back to LLM
+  //   4. LLM sees the tool result → decides: answer now OR call another tool
+  //   5. Repeat until LLM gives a final text response or step limit is hit
+  //
+  // stepCountIs(5) = LLM can chain up to 5 tool calls per user message.
+  // This replaced maxSteps in AI SDK v6.
   const result = streamText({
     model: openai("gpt-4o-mini"),
-    system: fullSystemPrompt,
-    messages: convertToModelMessages(messages),
+    system: SYSTEM_PROMPT,
+    messages: await convertToModelMessages(messages),
+    tools,
+    stopWhen: stepCountIs(5),
     temperature: 0.1,
   });
 

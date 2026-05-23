@@ -125,32 +125,43 @@ Query Flow:
 ### What Gets Built
 - Tool/function calling (LLM decides which tools to invoke)
 - Diagram generation (Mermaid architecture diagrams)
-- Structured data extraction from documents
 - Multi-step reasoning (agent loop: think → act → observe → think)
-- Web search integration (for up-to-date information)
 - Summary generation across multiple documents
+- Document catalog browsing
+- Removed hardcoded RAG — LLM decides when to search
 
 ### AI Concepts Learned
-- Function calling / tool use (OpenAI function calling API)
-- Agent loops (ReAct pattern: Reasoning + Acting)
-- How to define tools with JSON schemas
-- Multi-step task execution
-- Error handling for non-deterministic systems
+- Function calling / tool use (OpenAI function calling via Vercel AI SDK `tool()`)
+- Agent loops (ReAct pattern via `stopWhen: stepCountIs(5)`)
+- How to define tools with Zod schemas (`inputSchema`)
+- Multi-step task execution (search → diagram in one query)
 - When to use agents vs. simple chains vs. direct prompts
+- Rendering non-text streaming parts (tool activity indicators, Mermaid diagrams)
 
 ### Architecture
 ```
-User Query → Router (decide if tools needed)
-  → Simple Q&A: direct LLM call
-  → Needs tools: Agent Loop
-       → LLM decides tool + arguments
-       → Execute tool (search, diagram, summarize, etc.)
-       → Feed result back to LLM
-       → LLM decides: done or need another tool?
-       → Final response to user
+User Query → LLM sees available tools → decides what to do:
+  "hi"                      → answers directly, no tool call
+  "retry policy?"           → searchKnowledgeBase → answer with citations
+  "what docs do you have?"  → listDocuments → summarize catalog
+  "draw architecture"       → searchKnowledgeBase → generateDiagram → render Mermaid
+  "summarize all runbooks"  → summarizeDocuments → cross-document summary
 ```
 
-### Status: NOT STARTED
+### Key Files
+- `src/lib/tools.ts` — All tool definitions (searchKnowledgeBase, listDocuments, generateDiagram, summarizeDocuments)
+- `src/app/api/chat/route.ts` — Refactored: removed hardcoded RAG, added tools + agent loop with `stopWhen`
+- `src/components/chat-message.tsx` — Updated to render tool activity (loading dots, done indicators, diagrams)
+- `src/components/mermaid-diagram.tsx` — Renders Mermaid syntax as SVG via dynamic import
+
+### Lessons Learned
+- AI SDK v6 renamed `parameters` to `inputSchema` and `maxSteps` to `stopWhen: stepCountIs(n)`
+- Tool parts in v6 use type `tool-${toolName}` (e.g. `tool-searchKnowledgeBase`), not `tool-invocation` or `dynamic-tool`
+- Tool states are `input-streaming` → `input-available` → `output-available`, not `call` → `result`
+- Always log raw `message.parts` when debugging streaming UI — the actual structure often differs from docs
+- Tools need per-request context (Supabase client, org_id) — use a factory function, not static constants
+
+### Status: COMPLETED
 
 ---
 
