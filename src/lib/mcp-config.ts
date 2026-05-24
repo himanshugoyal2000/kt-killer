@@ -16,22 +16,19 @@ export function getMcpServerConfigs(): McpServerConfig[] {
 
   // DeepWiki — free, public, no-auth MCP server.
   // Provides tools to search and read documentation from any GitHub repository.
-  // This is an open source project: https://github.com/AsyncFuncAI/deepwiki-open
   configs.push({
     name: "deepwiki",
     transport: "http",
     url: "https://mcp.deepwiki.com/mcp",
   });
 
-  // Team Directory — local stdio server (only works in local dev, not on Vercel).
-  // Uncomment to use locally:
-  // const projectRoot = process.cwd();
-  // configs.push({
-  //   name: "team-directory",
-  //   transport: "stdio",
-  //   command: "node",
-  //   args: [path.join(projectRoot, "mcp-servers/team-directory/dist/index.js")],
-  // });
+  // Team Directory — our own MCP server deployed on Vercel.
+  // Provides employee lookup, team search, and org chart tools.
+  configs.push({
+    name: "team-directory",
+    transport: "http",
+    url: "https://mcp-servers-ten.vercel.app/mcp",
+  });
 
   return configs;
 }
