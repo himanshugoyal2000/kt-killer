@@ -106,7 +106,10 @@ function LoadingDots() {
 }
 
 function getToolLabel(toolName: string, input: any): string {
-  switch (toolName) {
+  // MCP tools are prefixed: "serverName__toolName" — extract the base name
+  const baseName = toolName.includes("__") ? toolName.split("__")[1] : toolName;
+
+  switch (baseName) {
     case "searchKnowledgeBase":
       return `Searching knowledge base for "${input?.query ?? "..."}"`;
     case "listDocuments":
@@ -115,20 +118,38 @@ function getToolLabel(toolName: string, input: any): string {
       return `Generating ${input?.diagramType ?? ""} diagram...`;
     case "summarizeDocuments":
       return `Gathering documents about "${input?.topic ?? "..."}"`;
+    case "lookupEmployee":
+      return `Looking up "${input?.name ?? "..."}" in team directory...`;
+    case "findTeamMembers":
+      return "Searching team directory...";
+    case "getOrgChart":
+      return "Fetching org chart...";
     default:
-      return "Working...";
+      return `Running ${formatToolName(baseName)}...`;
   }
 }
 
 function getToolDoneLabel(toolName: string): string {
-  switch (toolName) {
+  const baseName = toolName.includes("__") ? toolName.split("__")[1] : toolName;
+
+  switch (baseName) {
     case "searchKnowledgeBase":
       return "Searched knowledge base";
     case "listDocuments":
       return "Fetched documents";
     case "summarizeDocuments":
       return "Gathered documents";
+    case "lookupEmployee":
+      return "Found employee info";
+    case "findTeamMembers":
+      return "Found team members";
+    case "getOrgChart":
+      return "Retrieved org chart";
     default:
-      return "Done";
+      return `${formatToolName(baseName)} complete`;
   }
+}
+
+function formatToolName(name: string): string {
+  return name.replace(/([A-Z])/g, " $1").trim().toLowerCase();
 }

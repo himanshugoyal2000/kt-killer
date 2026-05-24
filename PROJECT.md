@@ -168,34 +168,56 @@ User Query → LLM sees available tools → decides what to do:
 ## Phase 4: MCP — Making KT-Killer a Platform
 
 ### What Gets Built
-- Turn KT-Killer's knowledge base into an MCP Server that any MCP client can connect to
-- Make KT-Killer an MCP Client that can connect to external MCP servers
-- Connect to a real third-party MCP server (e.g., Confluence)
-- Admin UI to configure which MCP servers an org connects to
+- KT-Killer as MCP Server: standalone process that exposes knowledge base tools over MCP protocol (stdio transport)
+- KT-Killer as MCP Client: spawns external MCP servers, discovers tools at runtime, wraps them as AI SDK tools
+- Team Directory MCP Server: sample external server with employee lookup, skill search, and org chart tools
+- Unified tool list: LLM sees both internal tools and MCP tools as one flat list — picks the best tool per question
+- MCP connection manager: singleton that caches connections across requests (avoids re-spawning per request)
 
 ### AI Concepts Learned
-- MCP protocol (JSON-RPC, tools/resources/prompts)
-- MCP Server development (expose your tools as a standard service)
-- MCP Client integration (consume external tools dynamically)
-- Dynamic tool registration (tools discovered at runtime, not hardcoded)
-- The "platform vs application" mindset
+- MCP protocol (JSON-RPC over stdio, `initialize` → `tools/list` → `tools/call` lifecycle)
+- MCP Server development (`McpServer` + `StdioServerTransport` from `@modelcontextprotocol/sdk`)
+- MCP Client integration (`Client` + `StdioClientTransport` — spawn server as child process)
+- Dynamic tool discovery: tools/list returns JSON Schema descriptions, we wrap them with AI SDK `tool()` + `jsonSchema()`
+- Tool namespacing: prefix MCP tools with `serverName__toolName` to avoid name collisions
+- The "platform vs application" mindset — KT-Killer is now extensible without code changes
 
 ### Architecture
 ```
-KT-Killer as MCP Client:
-  User Query → LLM → decides which tool → could be:
-    ├── Internal tool (searchKnowledgeBase)
-    ├── Confluence MCP Server → search live Confluence pages
-    ├── Slack MCP Server → search Slack history
-    └── Any custom MCP Server the company plugs in
+KT-Killer as MCP Client (inside Next.js):
+  Chat API request
+    → getMcpTools() — spawns & caches MCP server connections
+    → tools/list — discovers external tools
+    → merges with internal tools (searchKnowledgeBase, etc.)
+    → LLM decides which tool → could be:
+        ├── Internal: searchKnowledgeBase, listDocuments, generateDiagram, summarizeDocuments
+        └── MCP: team-directory__lookupEmployee, team-directory__findTeamMembers, team-directory__getOrgChart
 
-KT-Killer as MCP Server:
-  External MCP Client (Cursor, Claude Desktop, etc.)
-    → connects to KT-Killer MCP Server
-    → can search the company knowledge base from any AI tool
+KT-Killer as MCP Server (standalone process):
+  Cursor / Claude Desktop / any MCP client
+    → spawns mcp-server/dist/index.js
+    → tools/list → discovers searchKnowledgeBase, listDocuments, summarizeDocuments
+    → tools/call → queries Supabase directly (uses service role key)
 ```
 
-### Status: NOT STARTED
+### Key Files
+- `mcp-server/src/index.ts` — KT-Killer as MCP Server (exposes knowledge base to external clients)
+- `mcp-servers/team-directory/src/index.ts` — Sample external MCP server (employee directory)
+- `src/lib/mcp-client.ts` — MCP Client: connects to external servers, wraps tools as AI SDK tools
+- `src/lib/mcp-config.ts` — Configuration: which MCP servers to connect to
+- `src/lib/mcp-manager.ts` — Singleton connection manager (caches across requests)
+- `src/app/api/chat/route.ts` — Updated: merges internal tools + MCP tools into one tool list
+- `src/components/chat-message.tsx` — Updated: handles MCP tool names (serverName__toolName prefix)
+
+### Lessons Learned
+- MCP SDK v1.x uses `@modelcontextprotocol/sdk`, v2 (pre-alpha) splits into `@modelcontextprotocol/server` and `@modelcontextprotocol/client`
+- Zod v3 is required for MCP SDK v1.x (it uses JSON Schema draft-07 internally), while the main app uses Zod v4
+- `StdioServerTransport` communicates via stdin/stdout — any console.log in the MCP server would break the protocol (use stderr for debug logging)
+- MCP tools return `{ content: [{ type: "text", text: "..." }] }` — need to flatten to a string for the AI SDK
+- Tool namespacing (`serverName__toolName`) prevents collisions when multiple servers expose tools with the same name
+- Connection caching in a module-level singleton works in serverless (warm invocations reuse), but cold starts re-connect
+
+### Status: COMPLETED
 
 ---
 

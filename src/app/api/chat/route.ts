@@ -2,18 +2,23 @@ import { streamText, convertToModelMessages, stepCountIs } from "ai";
 import { openai } from "@ai-sdk/openai";
 import { createClient } from "@/lib/supabase/server";
 import { createTools } from "@/lib/tools";
+import { getMcpTools } from "@/lib/mcp-manager";
 
-// Phase 3 system prompt: the LLM is now an AGENT with tools.
-// Instead of "here's context, answer from it" (Phase 2),
-// we tell the model "you have tools — decide which ones to use."
+// Phase 4 system prompt: the LLM now has BOTH internal tools AND external MCP tools.
+// It doesn't need to know which tools come from where — it just sees a flat list
+// and picks the best tool for each question.
 const SYSTEM_PROMPT = `You are KT-Killer, an AI-powered company knowledge assistant.
 Your job is to help engineers find information, understand systems, and onboard faster.
 
-You have access to tools that let you search the knowledge base, list documents,
-generate diagrams, and summarize across multiple documents.
+You have access to tools that let you:
+- Search the knowledge base for technical docs, runbooks, and processes
+- List and summarize documents across the knowledge base
+- Generate diagrams from retrieved information
+- Look up employees, find team members by skill/department, and view the org chart
 
 Rules:
 - For company-specific questions, ALWAYS use the searchKnowledgeBase tool first.
+- For people questions (who works on X, who is Y, org chart), use the team directory tools.
 - When citing information, use the format: (Source: Space > Document Title)
 - If no relevant information is found, say so clearly. Do not make up answers.
 - For diagram requests, first search for relevant info, then generate the diagram.
@@ -30,7 +35,10 @@ export async function POST(req: Request) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  let tools = {};
+  // Phase 4: merge internal tools (our knowledge base) with MCP tools (external servers).
+  // The LLM sees one flat tool list — it doesn't know or care which tools are "ours"
+  // vs which come from external MCP servers. This is the power of the protocol.
+  let internalTools: Record<string, any> = {};
 
   if (user) {
     const { data: profile } = await supabase
@@ -40,25 +48,24 @@ export async function POST(req: Request) {
       .single();
 
     if (profile?.org_id) {
-      tools = createTools(supabase, profile.org_id);
+      internalTools = createTools(supabase, profile.org_id);
     }
   }
 
-  // streamText with tools + stopWhen creates the AGENT LOOP:
-  //
-  //   1. LLM sees the user message + tool descriptions
-  //   2. LLM decides: answer directly OR call a tool
-  //   3. If tool called → our execute() runs → result sent back to LLM
-  //   4. LLM sees the tool result → decides: answer now OR call another tool
-  //   5. Repeat until LLM gives a final text response or step limit is hit
-  //
-  // stepCountIs(5) = LLM can chain up to 5 tool calls per user message.
-  // This replaced maxSteps in AI SDK v6.
+  let mcpTools: Record<string, any> = {};
+  try {
+    mcpTools = await getMcpTools();
+  } catch (error) {
+    console.error("[MCP] Failed to get MCP tools:", error);
+  }
+
+  const allTools = { ...internalTools, ...mcpTools };
+
   const result = streamText({
     model: openai("gpt-4o-mini"),
     system: SYSTEM_PROMPT,
     messages: await convertToModelMessages(messages),
-    tools,
+    tools: allTools,
     stopWhen: stepCountIs(5),
     temperature: 0.1,
   });

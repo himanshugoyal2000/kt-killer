@@ -11,6 +11,7 @@
   "dependencies": {
     "@ai-sdk/openai": "^3.0.64",
     "@ai-sdk/react": "^3.0.187",
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.106.1",
     "ai": "^6.0.185",
