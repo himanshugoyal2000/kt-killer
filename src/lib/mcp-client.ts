@@ -1,44 +1,69 @@
 // MCP Client — connects to external MCP servers and wraps their tools for the AI SDK.
 //
-// This is the "consumer" side of MCP. Our app:
-//   1. Reads a config of MCP servers (what command to run, what args)
-//   2. Spawns each server as a child process
-//   3. Connects via stdio transport
-//   4. Calls tools/list to discover what tools each server offers
-//   5. Wraps each discovered tool as an AI SDK `tool()` so the LLM can use it
+// Supports two transport types:
+//   - "stdio": spawns the server as a local child process (for dev / local servers)
+//   - "http": connects to a remote server over Streamable HTTP (for production / Vercel)
 //
-// The result: the LLM sees both our internal tools (searchKnowledgeBase, etc.)
-// AND external tools (lookupEmployee, etc.) in a single unified tool list.
+// The LLM doesn't know which transport a tool uses — it just sees a flat tool list.
 
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { tool } from "ai";
 import { jsonSchema } from "ai";
 
-// Config shape for an MCP server connection
-export interface McpServerConfig {
+// Config for a remote HTTP MCP server (works on Vercel + everywhere)
+export interface McpHttpServerConfig {
   name: string;
+  transport: "http";
+  url: string;
+}
+
+// Config for a local stdio MCP server (dev only, not on Vercel)
+export interface McpStdioServerConfig {
+  name: string;
+  transport: "stdio";
   command: string;
   args: string[];
   env?: Record<string, string>;
 }
 
-// Holds a live connection to one MCP server
+export type McpServerConfig = McpHttpServerConfig | McpStdioServerConfig;
+
 interface McpConnection {
   name: string;
   client: Client;
-  transport: StdioClientTransport;
+  transport: { close(): Promise<void> };
 }
 
 const connections: McpConnection[] = [];
 
-// Connect to a single MCP server and return its discovered tools as AI SDK tools.
-async function connectToServer(config: McpServerConfig) {
+async function connectToHttpServer(config: McpHttpServerConfig) {
+  const transport = new StreamableHTTPClientTransport(new URL(config.url));
+
+  const client = new Client(
+    { name: "kt-killer", version: "1.0.0" },
+    { capabilities: {} }
+  );
+
+  await client.connect(transport);
+  connections.push({ name: config.name, client, transport });
+
+  return { client, serverName: config.name };
+}
+
+async function connectToStdioServer(config: McpStdioServerConfig) {
+  // Dynamic import — StdioClientTransport uses Node child_process,
+  // which doesn't exist on Vercel's edge/serverless runtime.
+  // By importing dynamically, the HTTP path never loads this module.
+  const { StdioClientTransport } = await import(
+    "@modelcontextprotocol/sdk/client/stdio.js"
+  );
+
   const transport = new StdioClientTransport({
     command: config.command,
     args: config.args,
     env: {
-      ...process.env as Record<string, string>,
+      ...(process.env as Record<string, string>),
       ...(config.env ?? {}),
     },
   });
@@ -49,23 +74,20 @@ async function connectToServer(config: McpServerConfig) {
   );
 
   await client.connect(transport);
-
-  const { tools: mcpTools } = await client.listTools();
-
   connections.push({ name: config.name, client, transport });
 
-  // Convert each MCP tool into an AI SDK tool.
-  // The MCP tool has:
-  //   - name: string
-  //   - description: string
-  //   - inputSchema: JSON Schema object
-  //
-  // We wrap it with ai's tool() so the LLM can call it. When the LLM calls it,
-  // we forward the call to the MCP server via client.callTool().
-  const aiTools: Record<string, ReturnType<typeof tool>> = {};
+  return { client, serverName: config.name };
+}
+
+// Wraps MCP tools as AI SDK tools — same logic regardless of transport.
+function wrapMcpTools(
+  client: Client,
+  serverName: string,
+  mcpTools: any[]
+): Record<string, any> {
+  const aiTools: Record<string, any> = {};
 
   for (const mcpTool of mcpTools) {
-    const serverName = config.name;
     const toolName = mcpTool.name;
 
     aiTools[`${serverName}__${toolName}`] = tool({
@@ -77,8 +99,6 @@ async function connectToServer(config: McpServerConfig) {
           arguments: args,
         });
 
-        // MCP tools return { content: [{ type: "text", text: "..." }, ...] }
-        // We flatten that into a single string for the LLM.
         const textParts = (result.content as any[])
           ?.filter((c: any) => c.type === "text")
           .map((c: any) => c.text);
@@ -91,11 +111,20 @@ async function connectToServer(config: McpServerConfig) {
   return aiTools;
 }
 
-// Connect to all configured MCP servers and return a combined tool map.
+async function connectToServer(config: McpServerConfig) {
+  const { client, serverName } =
+    config.transport === "http"
+      ? await connectToHttpServer(config)
+      : await connectToStdioServer(config);
+
+  const { tools: mcpTools } = await client.listTools();
+  return wrapMcpTools(client, serverName, mcpTools);
+}
+
 export async function discoverMcpTools(
   configs: McpServerConfig[]
-): Promise<Record<string, ReturnType<typeof tool>>> {
-  const allTools: Record<string, ReturnType<typeof tool>> = {};
+): Promise<Record<string, any>> {
+  const allTools: Record<string, any> = {};
 
   for (const config of configs) {
     try {
@@ -109,7 +138,6 @@ export async function discoverMcpTools(
   return allTools;
 }
 
-// Clean up all connections on shutdown.
 export async function disconnectAll() {
   for (const conn of connections) {
     try {

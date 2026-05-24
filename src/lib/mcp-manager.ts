@@ -12,12 +12,11 @@
 
 import { discoverMcpTools, disconnectAll } from "./mcp-client";
 import { getMcpServerConfigs } from "./mcp-config";
-import { tool } from "ai";
 
-let cachedTools: Record<string, ReturnType<typeof tool>> | null = null;
-let connectionPromise: Promise<Record<string, ReturnType<typeof tool>>> | null = null;
+let cachedTools: Record<string, any> | null = null;
+let connectionPromise: Promise<Record<string, any>> | null = null;
 
-export async function getMcpTools(): Promise<Record<string, ReturnType<typeof tool>>> {
+export async function getMcpTools(): Promise<Record<string, any>> {
   if (cachedTools) return cachedTools;
 
   // Prevent multiple simultaneous connection attempts (race condition guard).

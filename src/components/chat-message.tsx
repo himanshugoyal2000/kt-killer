@@ -108,6 +108,7 @@ function LoadingDots() {
 function getToolLabel(toolName: string, input: any): string {
   // MCP tools are prefixed: "serverName__toolName" — extract the base name
   const baseName = toolName.includes("__") ? toolName.split("__")[1] : toolName;
+  const serverName = toolName.includes("__") ? toolName.split("__")[0] : null;
 
   switch (baseName) {
     case "searchKnowledgeBase":
@@ -125,12 +126,14 @@ function getToolLabel(toolName: string, input: any): string {
     case "getOrgChart":
       return "Fetching org chart...";
     default:
+      if (serverName) return `Querying ${serverName}: ${formatToolName(baseName)}...`;
       return `Running ${formatToolName(baseName)}...`;
   }
 }
 
 function getToolDoneLabel(toolName: string): string {
   const baseName = toolName.includes("__") ? toolName.split("__")[1] : toolName;
+  const serverName = toolName.includes("__") ? toolName.split("__")[0] : null;
 
   switch (baseName) {
     case "searchKnowledgeBase":
@@ -146,6 +149,7 @@ function getToolDoneLabel(toolName: string): string {
     case "getOrgChart":
       return "Retrieved org chart";
     default:
+      if (serverName) return `${serverName}: ${formatToolName(baseName)} complete`;
       return `${formatToolName(baseName)} complete`;
   }
 }
